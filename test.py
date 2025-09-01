@@ -2,7 +2,7 @@ import os
 import hashlib
 import typing as t
 import customtkinter as ctk
-from tkinter import messagebox, filedialog,PhotoImage
+from tkinter import messagebox, filedialog, PhotoImage
 import socket
 from PIL import Image
 from typing import List, Optional
@@ -21,13 +21,18 @@ ctk.set_default_color_theme("blue")
 
 # ---------- Backend API (socket FTP-like) ----------
 class SocketBackend:
-    def __init__(self, host: str = "127.0.0.1", port: int = 2122):
+    def __init__(self, host: str = "127.0.0.1", port: int = 2122, debug: bool = False):
         self.host = host
         self.port = port
         self.password: str = ""
         self.name: str = ""
         self.sock: Optional[socket.socket] = None
+        self.debug = debug
         self.connect()
+
+    def debug_print(self, message):
+        if self.debug:
+            print(f"[DEBUG] {message}")
 
     def connect(self):
         if self.sock:
@@ -35,12 +40,12 @@ class SocketBackend:
                 self.sock.close()
             except Exception:
                 pass
-        print(f"Connecting to {self.host}:{self.port}")
+        self.debug_print(f"Connecting to {self.host}:{self.port}")
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((self.host, self.port))
         try:
             banner = self.sock.recv(1024).decode(errors="ignore")
-            print(banner.strip())
+            self.debug_print(f"Received: {banner.strip()}")
         except Exception:
             pass
 
@@ -48,17 +53,20 @@ class SocketBackend:
         """Login with username and password. Returns True if successful."""
         password = hashlib.sha256(f'{password}'.encode()).hexdigest()
         self._send(f"LOGIN {username}_{password}")
-        if self._recv_all() == "LOGIN SUCCESS":
+        response = self._recv_all()
+        if "200 LOGIN SUCCESS" in response:
             self.name = username
             self.password = password
             return True
         else:
             return False
+
     def register(self, username: str, password: str) -> bool:
         """Register with username and password. Returns True if successful."""
         password = hashlib.sha256(f'{password}'.encode()).hexdigest()
         self._send(f"REGISTER {username}_{password}")
-        if self._recv_all() == "REGISTER SUCCESS":
+        response = self._recv_all()
+        if "201 REGISTER SUCCESS" in response:
             self.name = username
             self.password = password
             return True
@@ -74,9 +82,9 @@ class SocketBackend:
         """Check if user is logged in."""
         return self.password != None
 
-
     def _send(self, text: str):
         assert self.sock, "Not connected"
+        self.debug_print(f"Sent: {text}")
         self.sock.sendall(text.encode() + b"\n")
 
     def _recv_all(self, timeout: float = 0.01) -> str:
@@ -92,7 +100,10 @@ class SocketBackend:
             pass
         finally:
             self.sock.settimeout(None)
-        return data.decode(errors="ignore").strip()
+        decoded_data = data.decode(errors="ignore").strip()
+        self.debug_print(f"Received: {decoded_data}")
+        return decoded_data
+
     def _recv_all_bytes(self, timeout: float = 0.01) -> bytes:
         self.sock.settimeout(timeout)
         data = b""
@@ -106,110 +117,93 @@ class SocketBackend:
             pass
         finally:
             self.sock.settimeout(None)
+        self.debug_print(f"Received {len(data)} bytes")
         return data
+
     # --- high-level API for your UI ---
     def list_repos(self) -> List[str]:
         """First-level dirs inside ftp_root are 'repos'."""
         self._send("LIST ")
         raw = self._recv_all()
-        if raw in ("No files.", "Directory not found.", "Not a directory.") or not raw:
-            return []
-        return [line for line in raw.split("\n") if line]
+        if raw.startswith("200 OK"):
+            return [line for line in raw.split("\n")[1:] if line]
+        return []
 
     def list_owned_repos(self) -> List[str]:
         """Get repositories owned by the user."""
         self._send("GETREPOS")
         raw = self._recv_all()
-        if not raw:
-            return []
-        return raw.split(",")
+        if raw.startswith("200 OK"):
+            return raw.split("\n")[1].split(",")
+        return []
 
     def list_files(self, repo: str, path: str = "") -> List[dict]:
         """List inside given repo/path."""
         full_path = os.path.join(repo, path).replace("\\", "/").strip("/")
-        #print(f"DEBUG: Listing files in {full_path}")
         self._send(f"LIST {full_path}")
         raw = self._recv_all()
-        #print(f"DEBUG: List response: {repr(raw)}")
-        if raw in ("No files.", "Directory not found.", "Not a directory.", "Access denied") or not raw:
-            return []
-        items = []
-        for name in raw.split("\n"):
-            name = name.strip()
-            if not name:
-                continue
-            # Try to determine if it's a directory by checking if it has a file extension
-            # Files typically have extensions, directories typically don't
-            # But we'll be more conservative - only mark as file if it clearly has an extension
-            has_extension = bool(os.path.splitext(name)[1])
-            items.append({
-                "name": name,
-                "path": f"{path}/{name}".strip("/"),
-                "is_dir": not has_extension  # no extension = likely directory
-            })
-        items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
-        #print(f"DEBUG: Found {len(items)} items")
-        return items
+        if raw.startswith("200 OK"):
+            items = []
+            for name in raw.split("\n")[1:]:
+                name = name.strip()
+                if not name:
+                    continue
+                has_extension = bool(os.path.splitext(name)[1])
+                items.append({
+                    "name": name,
+                    "path": f"{path}/{name}".strip("/"),
+                    "is_dir": not has_extension
+                })
+            items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            return items
+        return []
 
     def get_file(self, repo: str, path: str) -> str:
         full_path = os.path.join(repo, path).replace("\\", "/")
-        #print(f"DEBUG: Getting file {full_path}")
         self._send(f"GET {full_path}")
         data = self._recv_all()
-        #print(f"DEBUG: Received {len(data)} bytes")
-        if "File not found" in data:
-            #print(f"DEBUG: File not found: {full_path}")
-            return ""
-        if not data:
-            #print(f"DEBUG: Empty file: {full_path}")
-            return ""  # Empty file
-        try:
-            return data
-        except UnicodeDecodeError:
-            return data[:4096].hex(" ")
+        if data.startswith("200 OK"):
+            return data.split("\n", 1)[1]
+        return ""
 
     def save_file(self, repo: str, path: str, content: str) -> bool:
         full_path = os.path.join(repo, path).replace("\\", "/")
         self._send(f"PUT {full_path}")
-        try:
-            self.sock.recv(1024)  # "Send file data" message
-        except Exception:
-            pass
-        self.sock.sendall(content.encode() + b"<EOF>")
-        try:
-            self.sock.recv(1024)  # "File uploaded successfully"
-        except Exception:
-            pass
-        return True
+        response = self._recv_all()
+        if response.startswith("200 OK"):
+            self.sock.sendall(content.encode() + b"<EOF>")
+            response = self._recv_all()
+            return response.startswith("200")
+        return False
+
     def get_file_bytes(self, repo: str, path: str) -> t.Optional[bytes]:
         full_path = os.path.join(repo, path).replace("\\", "/")
         self._send(f"GET {full_path}")
         data = self._recv_all_bytes()
-        if data.startswith(b"File not found"):
-            return None
-        return data
+        if data.startswith(b"200 OK"):
+            return data.split(b"\n", 1)[1]
+        return None
+
     def search(self, name: str) -> str:
         self._send(f"SEARCH {name}")
-        data = self._recv_all_bytes()
-        
-        decoded_data = data.decode(errors="ignore").strip()
-        if decoded_data:
-            return decoded_data.split("\n")[0]
-        else:
-            return ""
+        data = self._recv_all()
+        if data.startswith("200 OK"):
+            return data.split("\n")[1]
+        return ""
 
     def mkdir(self, path: str) -> bool:
         full_path = path.replace("\\", "/")
         self._send(f"MKDIR {full_path}")
-        try:
-            self.sock.recv(1024)
-        except Exception:
-            pass
-        return True
+        response = self._recv_all()
+        return response.startswith("201")
 
     def get_dir(self,  path: str):
         full_path = path.replace("\\", "/")
         self._send(f"GETDIR {full_path}")
+        response = self._recv_all()
+        if not response.startswith("200 OK"):
+            return
+
         while True:
             header = b""
             while not header.endswith(b"\n"):
@@ -220,7 +214,7 @@ class SocketBackend:
             header_s = header.decode().strip()
             if header_s == "DONE":
                 break
-            if header_s.startswith("Directory not found"):
+            if header_s.startswith("404"):
                 print(header_s)
                 break
             _, rel_path, size_str = header_s.split(" ", 2)
@@ -236,9 +230,14 @@ class SocketBackend:
                 remaining -= len(chunk)
             with open(rel_path, "wb") as f:
                 f.write(data)
+
     def get_dir_to(self, remote_path: str, dest_root: str):
         remote_path = remote_path.replace("\\", "/").strip("/")
         self._send(f"GETDIR {remote_path}")
+        response = self._recv_all()
+        if not response.startswith("200 OK"):
+            return
+
         while True:
             header = b""
             while not header.endswith(b"\n"):
@@ -249,7 +248,7 @@ class SocketBackend:
             header_s = header.decode().strip()
             if header_s == "DONE":
                 break
-            if header_s.startswith("Directory not found"):
+            if header_s.startswith("404"):
                 print(header_s)
                 break
             _, rel_path, size_str = header_s.split(" ", 2)
@@ -286,7 +285,7 @@ class SocketBackend:
         """Adds a user to a repository."""
         self._send(f"ADDUSER {repo_name}_{username}")
         response = self._recv_all()
-        return "success" in response.lower()
+        return response.startswith("200")
 
 # ---------- Utility ----------
 class Divider(ctk.CTkFrame):
@@ -743,6 +742,7 @@ class HomeView(ctk.CTkScrollableFrame):
         for i, r in enumerate(repos):
             card = RepoCard(grid, r, "Remote server", on_open=lambda name=r: on_open_repo(name))
             card.grid(row=i//2, column=i%2, sticky="ew", padx=6, pady=6)
+    
 
 class ExplorerView(ctk.CTkFrame):
     def __init__(self, master, backend: SocketBackend):
@@ -808,12 +808,9 @@ class ExplorerView(ctk.CTkFrame):
         def do_getdir():
             backend.get_dir(self.explorer.path)
 
-        ctk.CTkButton(bar, text="New Folder", fg_color=G_BG, hover_color="#0f172a", command=do_mkdir)\
-            .pack(side="left", padx=6, pady=6)
-        ctk.CTkButton(bar, text="Upload File", fg_color=G_BG, hover_color="#0f172a", command=do_put)\
-            .pack(side="left", padx=6, pady=6)
-        ctk.CTkButton(bar, text="Download Dir", fg_color=G_BG, hover_color="#0f172a", command=do_getdir)\
-            .pack(side="left", padx=6, pady=6)
+        ctk.CTkButton(bar, text="New Folder", fg_color=G_BG, hover_color="#0f172a", command=do_mkdir)	.pack(side="left", padx=6, pady=6)
+        ctk.CTkButton(bar, text="Upload File", fg_color=G_BG, hover_color="#0f172a", command=do_put)	.pack(side="left", padx=6, pady=6)
+        ctk.CTkButton(bar, text="Download Dir", fg_color=G_BG, hover_color="#0f172a", command=do_getdir)	.pack(side="left", padx=6, pady=6)
         ctk.CTkButton(bar, text="Save (Ctrl+S)", fg_color=G_ACCENT, hover_color="#1f6feb",
                       command=self.editor.save_active).pack(side="right", padx=6, pady=6)
 
@@ -888,7 +885,7 @@ class AccountView(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self, backend: SocketBackend = None):
         super().__init__()
-        self.backend = backend or SocketBackend()
+        self.backend = backend or SocketBackend(debug=True)
         self.title("FileNest")
         self.geometry("1100x700")
         self.minsize(900, 560)
