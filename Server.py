@@ -35,7 +35,7 @@ def list_files(path):
     if not os.path.isdir(path):
         return "Not a directory."
     files = os.listdir(path)
-    return "\n".join(files) if files else "No files."
+    return "\n".join(files) if files else "404 No files found."
 
 def search_by_name(target_file_name):
     found_files = []

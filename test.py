@@ -134,7 +134,8 @@ class SocketBackend:
         self._send("GETREPOS")
         raw = self._recv_all()
         if raw.startswith("200 OK"):
-            return raw.split("\n")[1].split(",")
+            if len(raw.split("\n")) > 1:
+                return raw.split("\n")[1].split(",")
         return []
 
     def list_files(self, repo: str, path: str = "") -> List[dict]:
@@ -188,7 +189,7 @@ class SocketBackend:
         self._send(f"SEARCH {name}")
         data = self._recv_all()
         if data.startswith("200 OK"):
-            return data.split("\n")[1]
+            return data.split("\n")[1:]
         return ""
 
     def mkdir(self, path: str) -> bool:
@@ -432,22 +433,28 @@ class TopBar(ctk.CTkFrame):
         super().__init__(master, fg_color=G_PANEL)
         self.grid_columnconfigure(1, weight=1)
         self.on_login = on_login
+        self.master = master
+        self.search_timer = None
 
         self.logo = ctk.CTkLabel(self, text="", font=("Segoe UI Symbol", 22), text_color=G_TEXT)
         self.logo.grid(row=0, column=0, padx=(12, 8), pady=10)
 
         self.search = ctk.CTkEntry(self, placeholder_text="Search…", fg_color=G_BG, border_color=G_BORDER)
         self.search.grid(row=0, column=1, sticky="ew", padx=6, pady=10)
-        self.search.bind("<Return>", lambda e: on_search(self.search.get()))
+        self.search.bind("<KeyRelease>", lambda e: self._on_search_delayed(on_search))
         self.logo.grid(row=0, column=3, padx=(6, 12))
 
         self.avatar = ctk.CTkLabel(self, text="", width=34, height=34, corner_radius=17,
                                    fg_color=G_BG, text_color=G_TEXT, font=("Inter", 12, "bold"))
         self.avatar.grid(row=0, column=3, padx=(6, 12))
-        
         # Bind click event to avatar for login
         self.avatar.bind("<Button-1>", lambda e: self.on_login())
-        
+
+    def _on_search_delayed(self, on_search):
+        if self.search_timer:
+            self.master.after_cancel(self.search_timer)
+        self.search_timer = self.master.after(1, lambda: on_search(self.search.get()))
+
     def update_avatar(self, username: str = None):
         """Update avatar text with user initials or default 'RO'"""
         if username:
@@ -557,7 +564,6 @@ class Explorer(ctk.CTkFrame):
 
         # FIX: include repo
         entries = self.backend.list_files(self.repo, self.path)
-
         container = self._container()
         for w in container.winfo_children():
             w.destroy()
@@ -825,33 +831,61 @@ class AccountView(ctk.CTkFrame):
         self.backend = backend
         self.selected_repo = None
 
-        ctk.CTkLabel(self, text="Account Settings", font=("Inter", 18, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        # Configure grid layout: 3 columns
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        # Add a scrollable frame for repositories
-        self.scrollable_frame = ctk.CTkScrollableFrame(self, label_text="Your Repositories")
-        self.scrollable_frame.pack(pady=20, padx=20, fill="both", expand=True)
+        ctk.CTkLabel(self, text="Account Settings", font=("Inter", 18, "bold")).grid(row=0, column=0, columnspan=3, padx=8, pady=(8, 4), sticky="ew")
 
-        # Get repositories from the server
-        repos = self.backend.list_owned_repos()
+        # --- Left Column ---
+        left_column = ctk.CTkFrame(self, fg_color="transparent")
+        left_column.grid(row=1, column=0, sticky="nsew", padx=(16, 0), pady=4)
+        left_column.grid_rowconfigure(0, weight=1)
 
-        for repo in repos:
-            repo_frame = ctk.CTkFrame(self.scrollable_frame)
-            repo_frame.pack(pady=5, padx=5, fill="x")
-            repo_label = ctk.CTkLabel(repo_frame, text=repo)
-            repo_label.pack(side="left", padx=5)
-            select_button = ctk.CTkButton(repo_frame, text="Select", command=lambda r=repo: self.select_repo(r))
-            select_button.pack(side="right", padx=5)
+        # Repo list
+        self.scrollable_frame = ctk.CTkScrollableFrame(left_column, label_text="Your Repositories", fg_color=G_PANEL, border_color=G_BORDER, border_width=1, width=300)
+        self.scrollable_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
 
         # Add user section
-        self.add_user_frame = ctk.CTkFrame(self)
-        self.add_user_frame.pack(pady=10)
+        self.add_user_frame = ctk.CTkFrame(left_column, fg_color="transparent")
+        self.add_user_frame.grid(row=1, column=0, sticky="ew", pady=4)
+        self.add_user_frame.grid_columnconfigure(0, weight=1)
 
         self.user_to_add_entry = ctk.CTkEntry(self.add_user_frame, placeholder_text="Username to add")
-        self.user_to_add_entry.pack(side="left", padx=5)
+        self.user_to_add_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
 
         self.add_user_button = ctk.CTkButton(self.add_user_frame, text="Add User", command=self.add_user)
-        self.add_user_button.pack(side="left", padx=5)
-        self.add_user_frame.pack_forget() # Hide initially
+        self.add_user_button.grid(row=0, column=1, sticky="e")
+        
+        # Initially hide the add user frame
+        self.add_user_frame.grid_remove()
+
+        # --- Middle and Right Columns ---
+        right_panel = ctk.CTkFrame(self, fg_color="transparent")
+        right_panel.grid(row=1, column=1, columnspan=2, sticky="nsew", padx=(0, 8), pady=4)
+        right_panel.grid_columnconfigure(0, weight=1)
+
+        # Settings Frame
+        settings_frame = ctk.CTkFrame(right_panel, fg_color=G_PANEL, border_color=G_BORDER, border_width=1)
+        settings_frame.grid(row=0, column=0, sticky="new", padx=4, pady=0)
+        settings_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(settings_frame, text="Account Actions", font=("Inter", 14, "bold")).grid(row=0, column=0, padx=12, pady=(12, 8), sticky="w")
+
+        # Change Password
+        ctk.CTkButton(settings_frame, text="Change Password", anchor="w", fg_color="transparent"
+                      , hover=False).grid(row=1, column=0, sticky="ew", padx=12, pady=4)
+        
+        # Logout
+        ctk.CTkButton(settings_frame, text="Logout", anchor="w", fg_color="transparent"
+                      , hover=False).grid(row=2, column=0, sticky="ew", padx=12, pady=4)
+
+        # Delete Account (with warning color)
+        ctk.CTkButton(settings_frame, text="Delete Account", anchor="w", text_color="#f85149", fg_color="transparent"
+                      , hover=False).grid(row=3, column=0, sticky="ew", padx=12, pady=(4, 12))
+
 
     def refresh(self):
         # Clear existing repos
@@ -862,16 +896,19 @@ class AccountView(ctk.CTkFrame):
         repos = self.backend.list_owned_repos()
 
         for repo in repos:
-            repo_frame = ctk.CTkFrame(self.scrollable_frame)
+            repo_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
             repo_frame.pack(pady=5, padx=5, fill="x")
             repo_label = ctk.CTkLabel(repo_frame, text=repo)
             repo_label.pack(side="left", padx=5)
             select_button = ctk.CTkButton(repo_frame, text="Select", command=lambda r=repo: self.select_repo(r))
             select_button.pack(side="right", padx=5)
+        
+        # Hide the add user frame on refresh
+        self.add_user_frame.grid_remove()
 
     def select_repo(self, repo_name):
         self.selected_repo = repo_name
-        self.add_user_frame.pack(pady=10) # Show the add user section
+        self.add_user_frame.grid() # Show the add user section
 
     def add_user(self):
         user_to_add = self.user_to_add_entry.get()
@@ -885,13 +922,16 @@ class AccountView(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self, backend: SocketBackend = None):
         super().__init__()
-        self.backend = backend or SocketBackend(debug=True)
+        self.backend = backend or SocketBackend()
         self.title("FileNest")
         self.geometry("1100x700")
         self.minsize(900, 560)
         self.iconbitmap("logo.ico")
         self.configure(fg_color=G_BG)
-
+        dialog = LoginDialog(self, self._on_login, self._on_register)
+        dialog.wait_window()
+        self.searchFrame = None
+        self.file_buttons = []
         # Layout grid
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -899,10 +939,9 @@ class App(ctk.CTk):
         # Top bar
         self.top = TopBar(self, self._on_search, self._login_dialog)
         self.top.grid(row=0, column=0, columnspan=2, sticky="ew")
-
+        
         # Divider
         Divider(self).grid(row=1, column=0, columnspan=2, sticky="ew")
-
         # Sidebar
         self.sidebar = SideBar(self, self._on_nav, self._refresh_repo_list)
         self.sidebar.grid(row=2, column=0, sticky="nsw")
@@ -931,8 +970,6 @@ class App(ctk.CTk):
         # Shortcuts
         self.bind_all("<Control-s>", lambda e: self.editor.save_active())
 
-        self._login_dialog()
-
     # ----- Navigation & helpers -----
     def _show(self, widget: ctk.CTkBaseClass):
         for w in self.stack.winfo_children():
@@ -949,29 +986,57 @@ class App(ctk.CTk):
             self._show(self.view_account)
 
     def _on_search(self, query: str):
-        filepath = self.backend.search(query) # This will be a path like "repo_name/path_in_repo"
-        #print(f"DEBUG: Search results: {filepath}")
-        if filepath and filepath != "No files found.": # Check for actual file path
-            parts = filepath.split("/", 1) # Split only once: ["repo_name", "path_in_repo"]
-            repo_name = parts[0]
-            path_in_repo = parts[1] if len(parts) > 1 else ""
+        if query=="":
+            self.file_buttons.clear()
+            for w in self.searchFrame.winfo_children():
+                w.destroy()
+        if self.searchFrame is None:
+            self.searchFrame = ctk.CTkFrame(self, fg_color="transparent", border_color=G_BORDER,width=1, height=1, border_width=2)
+            self.searchFrame.place(x=5, y=10)
+            self.searchFrame.lift()
 
-            # Open the repository
-            self._open_repo(repo_name)
+        for w in self.searchFrame.winfo_children():
+            w.destroy()
+        self.file_buttons.clear()
 
-            # 1. Navigate to the repository in the explorer
-            self.explorer.open_repo(repo_name, path_in_repo.rsplit("/", 1)[0]) # path_in_repo is the path within the repo
+        max_length = 200
+        filepath = self.backend.search(query)
 
-            # 2. Open the file in the editor
-            self.editor.open_file(path_in_repo) # editor.open_file expects path relative to the current repo
+        if filepath and filepath != "No files found.":
+            for e in filepath:
+                name = e[:max_length]
 
-            # 3. Activate the editor tab for the file
-            self.editor._activate(path_in_repo)
+                row = ctk.CTkFrame(self.searchFrame, fg_color="transparent", corner_radius=0)
+                row.pack(fill="x", padx=6, pady=2)
 
-            # 4. Refresh the explorer to show the file
-            self.explorer.refresh()
+                file_btn = ctk.CTkButton(
+                    row, text=name, fg_color="transparent", hover_color="#0f172a", corner_radius=0,
+                    anchor="w", command=lambda e=e: self._search_open(e)
+                )
+                file_btn.pack(side="left", fill="x", expand=True)
+                self.file_buttons.append(file_btn)
+    
+    def _search_open(self,file: str):
+        file=file.split("/", 1)
+        repo_name = file[0]
+        path_in_repo = file[1] if len(file) > 1 else ""
+        print(file ,path_in_repo)
+
+        # Open the repository
+        self._open_repo(repo_name)
+
+        # 1. Navigate to the repository in the explorer
+        if "/" in path_in_repo:
+            self.explorer.open_repo(repo_name, path_in_repo.rsplit("/", 1)[0])
         else:
-            messagebox.showinfo("Search Results", f"No files found for '{query}'.")
+            self.explorer.open_repo(repo_name, "")
+        # 2. Open the file in the editor
+        self.editor.open_file(path_in_repo) # editor.open_file expects path relative to the current repo
+
+        # 3. Activate the editor tab for the file
+        self.editor._activate(path_in_repo)
+
+        # 4. Refresh the explorer to show the file
         self.explorer.refresh()
 
     def _login_dialog(self):
@@ -1003,8 +1068,6 @@ class App(ctk.CTk):
 
     def _open_repo_from_sidebar(self, name: str):
         self._open_repo(name)
-
-
 
     def on_closing(self):
         try:
