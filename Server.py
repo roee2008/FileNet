@@ -19,11 +19,11 @@ def send_response(conn, message):
     debug_print(f"Sent: {message.strip()}")
     conn.sendall(message)
 
-def have_access(username, path, fileDB):
+def have_access(username, path, file_db):
     if not os.path.exists(path):
         return False
     path = path.replace("\\", "/").split("/")
-    files = fileDB.get_user_files(username)
+    files = file_db.get_user_files(username)
     for names in files:
         if names[1] == path[1]:
             return True
@@ -52,8 +52,8 @@ def handle_login(conn, state, context, **kwargs):
     """Handles user login."""
     username = kwargs.get('username')
     password = kwargs.get('password')
-    userDB = context['userDB']
-    user_data = userDB.get_user(username)
+    user_db = context['userDB']
+    user_data = user_db.get_user(username)
 
     if user_data and password == user_data[1]:
         send_response(conn, b"200 LOGIN SUCCESS\n")
@@ -65,17 +65,17 @@ def handle_register(conn, state, context, **kwargs):
     """Handles user registration."""
     username = kwargs.get('username')
     password = kwargs.get('password')
-    userDB = context['userDB']
+    user_db = context['userDB']
 
-    if userDB.get_user(username) is not None:
+    if user_db.get_user(username) is not None:
         send_response(conn, b"402 REGISTER FAILED: User already exists.\n")
     else:
-        userDB.new_user(username, password)
+        user_db.new_user(username, password)
         send_response(conn, b"201 REGISTER SUCCESS\n")
 
 def handle_list(conn, state, context, **kwargs):
     """Handles listing files and repositories."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     arg = kwargs.get('arg')
 
@@ -85,21 +85,21 @@ def handle_list(conn, state, context, **kwargs):
 
     if not arg:
         try:
-            files = fileDB.get_user_files(username)
-            repoList = [file[1] for file in files]
-            send_response(conn, b"200 OK\n" + "\n".join(repoList).encode() + b"\n")
+            files = file_db.get_user_files(username)
+            repo_list = [file[1] for file in files]
+            send_response(conn, b"200 OK\n" + "\n".join(repo_list).encode() + b"\n")
         except:
             send_response(conn, b"404 No files found.\n")
     else:
         target_dir = os.path.join(BASE_DIR, arg)
-        if not have_access(username, target_dir, fileDB):
+        if not have_access(username, target_dir, file_db):
             send_response(conn, b"403 Access denied.\n")
         else:
             send_response(conn, b"200 OK\n" + list_files(target_dir).encode() + b"\n")
 
 def handle_search(conn, state, context, **kwargs):
     """Handles searching for a file."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     target_file_name = kwargs.get('target_file_name')
 
@@ -109,7 +109,7 @@ def handle_search(conn, state, context, **kwargs):
 
     if target_file_name:
         found_files = search_by_name(target_file_name)
-        filtered_files = [file for file in found_files if have_access(username, "ftp_root\\" + file.split('/')[0], fileDB)]
+        filtered_files = [file for file in found_files if have_access(username, "ftp_root\\" + file.split('/')[0], file_db)]
         if filtered_files:
             response = "200 OK\n" + "\n".join(filtered_files)
         else:
@@ -120,7 +120,7 @@ def handle_search(conn, state, context, **kwargs):
 
 def handle_get(conn, state, context, **kwargs):
     """Handles retrieving a file."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     arg = kwargs.get('arg')
     target_dir = os.path.join(BASE_DIR, arg)
@@ -129,7 +129,7 @@ def handle_get(conn, state, context, **kwargs):
         send_response(conn, b"403 You must be logged in to perform this action.\n")
         return
 
-    if not have_access(username, target_dir, fileDB):
+    if not have_access(username, target_dir, file_db):
         send_response(conn, b"403 Access denied.\n")
     else:
         path = os.path.join(BASE_DIR, arg)
@@ -142,7 +142,7 @@ def handle_get(conn, state, context, **kwargs):
 
 def handle_getdir(conn, state, context, **kwargs):
     """Handles retrieving a directory."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     arg = kwargs.get('arg')
     target_dir = os.path.join(BASE_DIR, arg)
@@ -151,7 +151,7 @@ def handle_getdir(conn, state, context, **kwargs):
         send_response(conn, b"403 You must be logged in to perform this action.\n")
         return
 
-    if not have_access(username, target_dir, fileDB):
+    if not have_access(username, target_dir, file_db):
         send_response(conn, b"403 Access denied.\n")
     else:
         if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
@@ -171,7 +171,7 @@ def handle_getdir(conn, state, context, **kwargs):
 
 def handle_put(conn, state, context, **kwargs):
     """Handles uploading a file."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     arg = kwargs.get('arg')
     target_dir = os.path.join(BASE_DIR, arg)
@@ -180,7 +180,7 @@ def handle_put(conn, state, context, **kwargs):
         send_response(conn, b"403 You must be logged in to perform this action.\n")
         return
 
-    if not have_access(username, target_dir, fileDB):
+    if not have_access(username, target_dir, file_db):
         send_response(conn, b"403 Access denied.\n")
     else:
         path = os.path.join(BASE_DIR, arg)
@@ -199,7 +199,7 @@ def handle_put(conn, state, context, **kwargs):
 
 def handle_mkdir(conn, state, context, **kwargs):
     """Handles creating a directory."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     arg = kwargs.get('arg')
     target_dir = os.path.join(BASE_DIR, arg)
@@ -208,7 +208,7 @@ def handle_mkdir(conn, state, context, **kwargs):
         send_response(conn, b"403 You must be logged in to perform this action.\n")
         return
 
-    if not have_access(username, target_dir, fileDB):
+    if not have_access(username, target_dir, file_db):
         send_response(conn, b"403 Access denied.\n")
     else:
         new_dir = os.path.join(BASE_DIR, arg)
@@ -220,20 +220,20 @@ def handle_mkdir(conn, state, context, **kwargs):
 
 def handle_getrepos(conn, state, context, **kwargs):
     """Handles getting user's repositories."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
 
     if not username:
         send_response(conn, b"403 You must be logged in to perform this action.\n")
         return
 
-    repos = fileDB.get_user_files(username, include_shared=False)
+    repos = file_db.get_user_files(username, include_shared=False)
     repo_names = [repo[1] for repo in repos]
     send_response(conn, b"200 OK\n" + ",".join(repo_names).encode() + b"\n")
 
 def handle_adduser(conn, state, context, **kwargs):
     """Handles adding a user to a repo."""
-    fileDB = context['fileDB']
+    file_db = context['fileDB']
     username = state.get('name')
     repo_name = kwargs.get('repo_name')
     user_to_add = kwargs.get('user_to_add')
@@ -242,14 +242,14 @@ def handle_adduser(conn, state, context, **kwargs):
         send_response(conn, b"403 You must be logged in to perform this action.\n")
         return
 
-    files = fileDB.get_all_files()
+    files = file_db.get_all_files()
     file_id = -1
     for file in files:
         if file[1] == repo_name:
             file_id = file[0]
             break
     if file_id != -1:
-        fileDB.share_file_with_user(file_id, user_to_add)
+        file_db.share_file_with_user(file_id, user_to_add)
         send_response(conn, b"200 User added successfully.\n")
     else:
         send_response(conn, b"404 Repository not found.\n")
