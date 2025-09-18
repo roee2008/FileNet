@@ -2,9 +2,8 @@ import os
 import hashlib
 import typing as t
 import customtkinter as ctk
-from tkinter import messagebox, filedialog, PhotoImage
+from tkinter import messagebox, filedialog
 import socket
-from PIL import Image
 from typing import List, Optional
 
 # ---------- Color Theme ----------
@@ -307,7 +306,7 @@ class LoginDialog(ctk.CTkToplevel):
             print(f"Error setting icon: {e}")
         # Configure window
         self.title("Login")
-        self.geometry("300x300")  # Increased height for confirm password
+        self.geometry("150x150")  # Increased height for confirm password
         self.resizable(False, False)
         self.configure(fg_color=G_BG)
 
