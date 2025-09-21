@@ -179,5 +179,3 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
-/ftp_root/folder1/folder2
-/ftp_root

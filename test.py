@@ -563,6 +563,8 @@ class Explorer(ctk.CTkFrame):
 
         # FIX: include repo
         entries = self.backend.list_files(self.repo, self.path)
+        if entries[0]["name"].startswith("404"):
+            entries = None
         container = self._container()
         for w in container.winfo_children():
             w.destroy()
@@ -570,8 +572,7 @@ class Explorer(ctk.CTkFrame):
         if self.path:
             ctk.CTkButton(container, text="..", fg_color="transparent", hover_color="#0f172a",
                           anchor="w", command=self._go_up).pack(fill="x", padx=6, pady=(6, 0))
-
-        if not entries:
+        if entries is None: 
             ctk.CTkLabel(container, text="(Empty)", text_color=G_SUBTLE).pack(pady=10)
 
         for e in entries:

@@ -10,9 +10,6 @@ HOST = '127.0.0.1'
 PORT = 2122
 BASE_DIR = "ftp_root"
 DEBUG = True
-MAX_REQUESTS_PER_MINUTE = 15
-request_counts = {}
-last_request_times = {}
 
 os.makedirs(BASE_DIR, exist_ok=True)
 
@@ -190,6 +187,7 @@ def handle_put(conn, state, context, **kwargs):
     username = state.get('name')
     arg = kwargs.get('arg')
     target_dir = os.path.dirname(os.path.join(BASE_DIR, arg))
+    target_dir = os.path.split(target_dir)[0]
 
     if not username:
         send_response(conn, b"403 You must be logged in to perform this action.\n")
@@ -218,6 +216,7 @@ def handle_mkdir(conn, state, context, **kwargs):
     username = state.get('name')
     arg = kwargs.get('arg')
     target_dir = os.path.join(BASE_DIR, arg)
+    target_dir = os.path.split(target_dir)[0]
 
     if not username:
         send_response(conn, b"403 You must be logged in to perform this action.\n")
@@ -375,18 +374,6 @@ def run_command(conn, state, context, command_string):
 
 def handle_client(conn, addr):
     print(f"[+] Connected by {addr}")
-    ip = addr[0]
-    current_time = time.time()
-    if ip in last_request_times and current_time - last_request_times[ip] < 60:
-        request_counts[ip] = request_counts.get(ip, 0) + 1
-    else:
-        request_counts[ip] = 1
-    last_request_times[ip] = current_time
-
-    if request_counts.get(ip, 0) > MAX_REQUESTS_PER_MINUTE:
-        send_response(conn, b"429 Too Many Requests\n")
-        conn.close()
-        return
     send_response(conn, b"220 Welcome Server Online\n")
     client_state = {"name": None}
     server_context = {
@@ -407,20 +394,7 @@ def handle_client(conn, addr):
         server_context['fileDB'].close()
         server_context['userDB'].close()
         print(f"[-] {addr} disconnected")
-
-def cleanup_request_logs():
-    while True:
-        time.sleep(60)
-        current_time = time.time()
-        for ip, last_time in list(last_request_times.items()):
-            if current_time - last_time > 60:
-                del last_request_times[ip]
-                if ip in request_counts:
-                    del request_counts[ip]
-
 def main():
-    cleanup_thread = threading.Thread(target=cleanup_request_logs, daemon=True)
-    cleanup_thread.start()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
         s.listen()
