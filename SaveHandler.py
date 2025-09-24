@@ -1,7 +1,13 @@
 import hashlib
 import os
 from BaseDBHandler import BaseDBHandler
-
+class DiffCheck():
+    def check_diff(self,old_file,new_file):
+        with open(old_file, 'r', encoding='utf-8') as f:
+            old_file_content = f.read()
+        with
+    
+    
 class SaveHandler(BaseDBHandler):
     def __init__(self, db_name="SaveDB.sqlite"):
         super().__init__(db_name)
@@ -25,18 +31,19 @@ class SaveHandler(BaseDBHandler):
         next_version = (row[0] or 0) + 1
 
         # build the id as a SHA256 hash of "fileLoc:version"
-        raw = f"{file_loc}:{next_version}"
+        raw = f"{file_loc}"
         id_hash = hashlib.sha256(raw.encode()).hexdigest()
 
         # insert new row
-        cur.execute(
-            "INSERT INTO Saves (id, fileLoc, version) VALUES (?, ?, ?)",
-            (id_hash, file_loc, next_version)
-        )
+        self._execute("UPDATE Saves SET version = ? WHERE id = ?", (next_version, id_hash))
+        # cur.execute(
+        #     "INSERT INTO Saves (id, fileLoc, version) VALUES (?, ?, ?)",
+        #     (id_hash, file_loc, next_version)
+        # )
         os.makedirs("Abyss", exist_ok=True)
         file_path = os.path.join("Abyss", id_hash)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(file_change)
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(f"{file_change}\nV{next_version}\n")
         self.conn.commit()
         return id_hash, next_version
 
@@ -49,6 +56,6 @@ if __name__ == '__main__':
     # db_handler.commit()
 
     # Insert some files
-    print(db_handler.save_file("C:/foo.txt","dsds"))
+    print(db_handler.save_file("C:/foo.txt","ddddds"))
 
     db_handler.close()
